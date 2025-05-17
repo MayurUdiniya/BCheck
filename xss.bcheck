@@ -1,0 +1,39 @@
+metadata:
+    language: v2-beta
+    name: "Insertion-point-level - XSS Refined (Advanced Status Check)"
+    description: "Inserts a calculation into each parameter to detect suspicious input transformation, focusing on response body reflection and relevant status codes using regex for status check."
+    author: "Carlos Montoya, Modified"
+
+define:
+    # Using a slightly more unique payload to reduce chances of natural occurrence
+    calculation = "x'\"<img/src=burp-xss-test>"
+    answer = "<img/src=burp-xss-test>"
+
+# we will automatically insert into nested insertion points
+given insertion point then
+    # Prevent false positives: Check if base response body is not empty using regex match
+    # This checks if the body contains at least one character.
+    if {base.response.body} matches ".+" then
+        # Prevent false positives: Check if the answer is NOT already in the base response body
+        if not ({answer} in {base.response.body}) then
+            send payload:
+                appending: {calculation}
+
+            # Check if the status code is NOT in the 300-399 range using regex
+            # Regex: ^(?!3[0-9]{2}$)\d{3}$ matches a 3-digit number NOT starting with 3.
+            # This effectively filters out 3xx status codes.
+            if {latest.response.status_code} matches "^(?!3[0-9]{2}$)\d{3}$" then
+                 # Check if the latest response body is not empty using regex match
+                 if {latest.response.body} matches ".+" then
+                     # Check if the answer IS found in the latest response body
+                    if ({answer} in {latest.response.body}) then
+                        report issue:
+                            severity: high
+                            confidence: tentative
+                            detail: "Possible XSS: Reflected payload found in response body with status code {latest.response.status_code}. Manual investigation is advised."
+                            remediation: "Manual investigation is advised. Verify if the reflected input is being processed as executable code in the browser."
+                    end if # Matches innermost 'if' (answer in body)
+                 end if # Matches 'if' (latest body not empty)
+            end if # Matches 'if' (status code check)
+        end if # Matches 'if' (answer not in base body)
+    end if # Matches outermost 'if' (base body not empty)
